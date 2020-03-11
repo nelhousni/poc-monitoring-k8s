@@ -1,0 +1,152 @@
+---
+    apiVersion: rbac.authorization.k8s.io/v1beta1
+    kind: ClusterRoleBinding
+    metadata:
+      name: prometheus-rolebinding
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: prometheus-role
+    subjects:
+    - kind: ServiceAccount
+      name: prometheus-account
+      namespace: default
+---
+    apiVersion: rbac.authorization.k8s.io/v1beta1
+    kind: ClusterRole
+    metadata:
+      name: prometheus-role
+    rules:
+    - apiGroups: [""]
+      resources:
+      - nodes
+      - nodes/proxy
+      - services
+      - endpoints
+      - pods
+      verbs: ["get", "list", "watch"]
+    - apiGroups: [""]
+      resources:
+      - configmaps
+      verbs: ["get"]
+    - nonResourceURLs: ["/metrics"]
+      verbs: ["get"]
+---
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: prometheus-account
+      namespace: default
+---
+    kind: ConfigMap
+    apiVersion: v1
+    metadata:
+      name: prometheus-config
+    data:
+        prometheus.yml: |-
+            global:
+                scrape_interval: 10s
+                external_labels:
+                    monitor: 'local-monitor'
+            
+            scrape_configs:
+                - job_name: 'kubernetes-tomcat'
+                  metrics_path: /metrics/          
+                  kubernetes_sd_configs:
+                    - role: endpoints
+                      namespaces:
+                        names:
+                        - default
+                  relabel_configs: &kubernetes_config
+                    - source_labels: [__meta_kubernetes_service_label_app]
+                      separator: ;
+                      regex: java
+                      replacement: $1
+                      action: keep
+                    - source_labels: [__meta_kubernetes_endpoint_port_name]
+                      separator: ;
+                      regex: http
+                      replacement: $1
+                      action: keep
+                    - source_labels: [__meta_kubernetes_namespace]
+                      separator: ;
+                      regex: (.*)
+                      target_label: namespace
+                      replacement: $1
+                      action: replace
+                    - source_labels: [__meta_kubernetes_pod_name]
+                      separator: ;
+                      regex: (.*)
+                      target_label: pod
+                      replacement: $1
+                      action: replace
+                    - source_labels: [__meta_kubernetes_service_name]
+                      separator: ;
+                      regex: (.*)
+                      target_label: service
+                      replacement: $1
+                      action: replace
+                    - source_labels: [__meta_kubernetes_service_name]
+                      separator: ;
+                      regex: (.*)
+                      target_label: job
+                      replacement: ${1}
+                      action: replace
+                    - separator: ;
+                      regex: (.*)
+                      target_label: endpoint
+                      replacement: https
+                      action: replace
+
+                - job_name: 'kubernetes-app'
+                  metrics_path: /app-metrics/          
+                  kubernetes_sd_configs:
+                    - role: endpoints
+                      namespaces:
+                        names:
+                        - default
+                  relabel_configs: *kubernetes_config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-deployment
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+        app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: prometheus-account
+      containers:
+      - name: prometheus
+        image: index.docker.io/prom/prometheus:v2.3.1
+        volumeMounts:
+          - name: config-volume
+            mountPath: /etc/prometheus/prometheus.yml
+            subPath: prometheus.yml
+        ports:
+        - containerPort: 9090
+      volumes:
+      - name: config-volume
+        configMap:
+          name: prometheus-config
+      restartPolicy: Always
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: prometheus-service
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - name: promui
+      protocol: TCP
+      port: 9090

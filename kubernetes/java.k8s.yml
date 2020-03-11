@@ -1,0 +1,36 @@
+---
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: java-deployment
+      labels:
+        app: java
+    spec:
+      replicas: 4
+      selector:
+        matchLabels:
+            app: java
+      template:
+        metadata:
+          labels:
+            app: java
+        spec:
+          containers:
+          - name: java
+            image: index.docker.io/psmonitoring/java:v2
+            ports:
+            - containerPort: 8080
+---
+kind: Service
+apiVersion: v1
+metadata:
+    name: java-service
+    labels:
+        app: java
+spec:
+    selector:
+        app: java
+    ports:
+    - name: http
+      protocol: TCP
+      port: 8080
